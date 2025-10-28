@@ -35,7 +35,7 @@ processor = AutoProcessor.from_pretrained(model_name)
 # 📚 2. Hàm sinh lời giải đầy đủ
 # ======================================================
 def generate_full_solution(image, question, max_new_tokens=1024,
-                           temperature=0.7, top_p=0.95, num_return_sequences=8):
+                           temperature=0.7, top_p=0.9, num_return_sequences=8):
     """
     Sinh lời giải hoàn chỉnh (từ Step 1 đến Final Answer).
     """
@@ -55,11 +55,7 @@ def generate_full_solution(image, question, max_new_tokens=1024,
             "content": [
                 {
                     "type": "text",
-                    "text": (
-                        "You are a geometry reasoning assistant. Solve the problem step by step. "
-                        "Show reasoning clearly and end with 'Final answer: <value>'.\n\n"
-                        "Format:\nStep 1: ...\nStep 2: ...\n...\nFinal answer: ...\n\n"
-                    )
+                    "text": base_prompt
                 }
             ]
         },
@@ -84,24 +80,24 @@ def generate_full_solution(image, question, max_new_tokens=1024,
 
 
     # Cắt phần prompt
-   generated_ids = model.generate(
+    generated_ids = model.generate(
         **inputs,
         max_new_tokens=256,
         do_sample=True,               # bật sampling thay vì greedy search
         temperature=0.8,              # càng cao → kết quả càng đa dạng
         top_p=0.9,                    # nucleus sampling
-        num_return_sequences=5,       # số câu trả lời muốn sinh
+        num_return_sequences=num_return_sequences,       # số câu trả lời muốn sinh
     )
 
 
     generated_ids_trimmed = [
     out_ids[len(inputs.input_ids[0]):] for out_ids in generated_ids
-]
-output_texts = processor.batch_decode(
-    generated_ids_trimmed,
-    skip_special_tokens=True,
-    clean_up_tokenization_spaces=False
-)
+    ]
+    output_texts = processor.batch_decode(
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
+    )
     return output_text
 
 
@@ -129,7 +125,7 @@ num_generations = 8  # số câu trả lời sinh cho mỗi câu hỏi
 print(f"🚀 Running inference on {total} samples with {num_generations} generations each...")
 with open(output_file, "w") as fout:
     for data in tqdm(test_data, desc="Processing"):
-        image_path ='/workspace/PRM/test/' +  data["image_paths"][0]  # giả sử chỉ có 1 hình
+        image_path = 'test/' +  data["image_paths"][0]  # giả sử chỉ có 1 hình
         question = data["meta"]["problem"]
         correct_answer = str(data["meta"]["answer"]).strip()
 
@@ -146,29 +142,17 @@ with open(output_file, "w") as fout:
             f"<image>{question}"
         )
 
-        multi_answers = []
-        for i in range(num_generations):
-            # Đặt seed để mỗi lần khác nhau
-            torch.manual_seed(i * 13 + 7)
-            try:
-                response, _ = model.chat(
-                    tokenizer,
-                    pixel_values,
-                    base_prompt,
-                    gen_cfg,
-                    history=None,
-                    return_history=True
-                )
-            except Exception as e:
-                response = f"ERROR: {e}"
-            multi_answers.append(response)
+        multi_answers = generate_full_solution(
+            image=image_path,
+            question=question,
+        )
 
         # Lưu kết quả
         result = {
-            "image": image_path,
+            "image_path": image_path,
             "question": question,
             "correct_answer": correct_answer,
-            "model_answers": multi_answers
+            "candidates": multi_answers
         }
         fout.write(json.dumps(result, ensure_ascii=False) + "\n")
         fout.flush()
